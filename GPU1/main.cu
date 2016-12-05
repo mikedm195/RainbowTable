@@ -24,7 +24,7 @@
 #define SIZE_SHA 33
 
 // number of bytes to be processed by GPU
-#define NUM_B 1000
+#define NUM_B 10000
 #define NUM_B_B 1000
 #define NUM_T_B 1024
 
