@@ -14,87 +14,87 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <fstream>
 
 // Limits of char values
 #define maxChar '~'
 #define minChar ' '
 
-#define SIZE_MD5 16
+#define SIZE_MD5 17
+#define SIZE_SHA 33
 
 // number of bytes to be processed by GPU
 #define NUM_B 1000
 #define NUM_B_B 1000
 #define NUM_T_B 1024
 
-char* nextChar(char* str){
+void nextChar(char* &str, int h){
 	int len = strlen(str);
-	char* s2 = (char*) malloc (len);
-
-	for(int i = len-1; i>=0; --i){
-		s2[i] = str[i];
-	}
 
 	for (int i = len-1; i >= 0; --i){
-		//s2[i] = str[i];
-		if(s2[i] < maxChar-1){
-			s2[i] =  s2[i] + 1;
-			//std::cout << " to: " <<s2[i] << "\n";
-			return s2;
+		if(str[i] < maxChar-1){
+			str[i] += 1;
+			return;
 		}
 		else{
-			s2[i] = minChar;
+			str[i] = minChar;
 		}
 	}
-	//std::cout << "cambio\n";
-	s2 = (char*) realloc (s2, len+1);
-	//s2[0] = 0;
-	char temp = s2[0];
+
+
+	if(len == h){
+		str = (char*) realloc (str, len+2);
+		//std::cout << "Big\n";
+		len++;
+	}
+
+	char temp = str[0];
 	char temp2;
-	for (int i = 1; i < len+1; ++i){
-		temp2 = s2[i];
-		s2[i] = temp;
+	for (int i = 1; i < len+2; ++i){
+		temp2 = str[i];
+		str[i] = temp;
 		temp = temp2;
 	}
-	//std::cout << "changed\n";
-	s2[0] = minChar;
-	return s2;
-}
-
-
-char** makeBrick(char** array, char* s, int lh){
-	//std::cout << s << " ini\n";
-	int cont = 0;
 	
-	while (cont < (NUM_B/lh) && strlen(s) <= lh){
-		array[cont] = s;
-		//std::cout << cont << ": -" << array[cont] << "-\n";
-		++cont;
-		s = nextChar(s);
-	}
-	while (cont < (NUM_B/lh)){
-		array[cont] = "";
-		++cont;
-	}
-	return array;
-}
-
-void print(char** arr, int lh){
-	for(int i = 0; i < NUM_B/lh; ++i){
-		//if(arr[i] == "")
-			//break;
-		std::cout << i << ": -" << arr[i] << "-\n";
-	}
-}
-
-__global__ void hashBrick(char** words, char** hashes){
-	int id = threadIdx.x + blockIdx.x * blockDim.x;
-	hashes[id] = "a";
+	str[0] = minChar;
+	//std::cout << "changed to: -" << str[1] << "-\n";
 }
 
 
-int main(int argc, char* argv[]){
+__global__ void hashBrick(char* a, char* r, int p1, int p2, int H, int algoritmo){
+	int id = threadIdx.x + (blockIdx.x * blockDim.x);
+	char* word = (char*)((char*)a + (id*p1));
+	char* hash = (char*)((char*)r + (id*p2));
 
-	int ll, lh, al, blocks, threads;
+	if(word[0] != '\0'){
+		/******* AQUI VA LA LLAMADA A FUNCION DE HASHEO  *******/
+
+		if(algoritmo == 1){
+			/**** MD5 *****/
+			//hash[0] = 48 + algoritmo;
+			//hash[1] = '\0';
+
+			hash[SIZE_MD5-1] = '\0';
+		}
+		else{
+			/***** SHA *****/
+
+			//hash[0] = 48 + algoritmo;
+			//hash[1] = '\0';
+			hash[SIZE_SHA-1] = '\0';
+		}
+	}
+	else{
+		hash[0] = '0';
+		hash[1] = '\0';
+	}
+
+}
+
+
+int main(int argc, const char* argv[]){
+
+	int ll, al, blocks, threads, algo;
 
 	if(argc < 3){
 		std::cout << "please choose algorythm: (1)MD5 (2)SHA, and length." << std::endl;
@@ -114,12 +114,14 @@ int main(int argc, char* argv[]){
 			return 0;
 		}
 		ll = atoi(argv[2]);
-		lh = atoi(argv[3]);
+		algo = atoi(argv[1]);
 	}
 	else{
 		ll = atoi(argv[2]);
-		lh = ll;
+		algo = atoi(argv[1]);
 	}
+
+	const int lh = (argc == 4)? atoi(argv[3]) : atoi(argv[2]);
 
 	float tiempo1;
 	cudaEvent_t inicio, fin;
@@ -150,59 +152,68 @@ int main(int argc, char* argv[]){
 		loops++;
 	std::cout << "Loops = " << loops << "\n";
 
-	char* first = (char*) malloc (lh);
-	for (int i = lh-1; i >= ll; --i){
+	char* first = (char*) malloc (lh+1);
+	for (int i = 0; i < ll; ++i){
 		first[i] = minChar;
 	}
+	first[ll] = '\0';
 
 	//std::cout << first << " first\n";
 
 	// Declare arrays
+	const int width = NUM_B/lh;
+	const int height = lh+1;
+	const int height2 = (algo==1)? SIZE_MD5 : SIZE_SHA;
+	size_t host_pitch1 = height*sizeof(char);
+	size_t host_pitch2 = height2*sizeof(char);
 
 	// CPU word aray
-	char** arr = (char**) malloc (sizeof(char*)*(NUM_B/lh));
-	for(int i = 0; i < (NUM_B/lh); ++i){
-		arr[i] = (char*)malloc(lh);
-		//std::cout << "Alloc with 0 = " << (int)arr[i][0] << "\n";
-	}
+	char arr[width][height];
+
 	//CPU hash array
-	char** hash = (char**) malloc (sizeof(char*)*(NUM_B/lh));
+	char hash[width][height2];
+
 	//GPU word array
-	char** arr_dev;
-	char** h_temp = (char**) malloc (sizeof(char*)*(NUM_B/lh));
-	for (int i  =0; i < (NUM_B/lh) ; ++i){
-		cudaMalloc((void**)&(h_temp[i]), lh);
-	}
-	cudaMalloc( (void**)&arr_dev, sizeof(char*)*(NUM_B/lh));
-	cudaMemcpy(arr_dev, h_temp, sizeof(char*)*(NUM_B/lh), cudaMemcpyHostToDevice);
+	char* arr_dev;
+	size_t pitch1;
+	cudaMallocPitch((void**)&arr_dev, &pitch1, height, width);
 	// GPU hash array
-	char** hash_dev;
-	char** h_temp2 = (char**) malloc (sizeof(char*)*(NUM_B/lh));
-	for (int i  =0; i < (NUM_B/lh) ; ++i){
-		cudaMalloc((void**)&h_temp2[i], lh);
-	}
-	cudaMalloc( (void**)&hash_dev, sizeof(char*)*(NUM_B/lh));
-	cudaMemcpy(hash_dev, h_temp2, sizeof(char*)*(NUM_B/lh), cudaMemcpyHostToDevice);
+	char* hash_dev;
+	size_t pitch2;
+	cudaMallocPitch((void**)&hash_dev, &pitch2, height2, width);
+
+	std::ofstream f;
+	f.open("Table.txt");
 	
 	for (int i = 0; i < loops; ++i){
-		std::cout << "entro\n";
-		arr = makeBrick(arr, first, lh);
 
-		for (int j  =0; j < (NUM_B/lh); ++j){
-			cudaMemcpy(h_temp[j], arr[j], lh, cudaMemcpyHostToDevice);
+		for(int j = 0; j < width; ++j){
+			if(strlen(first) <= height-1){
+				for(int k = 0; k < height; ++k){
+					arr[j][k] = first[k];
+				}
+				nextChar(first, lh);
+			}
+			else{
+				//std::cout << "nop: " << strlen(first) << " > "  << height-1 << std::endl;
+				arr[j][0] = '\0';
+			}
 		}
 
-		hashBrick<<<blocks,threads>>>(arr_dev, hash_dev);
+		cudaMemcpy2D(arr_dev, pitch1, arr, host_pitch1, height*sizeof(char), width, cudaMemcpyHostToDevice);
+
+		hashBrick<<<blocks,threads>>>(arr_dev, hash_dev, pitch1, pitch2, height, algo);
 		cudaThreadSynchronize();
-		first = nextChar(arr[(NUM_B/lh)-1]);
-		char** res = (char**)malloc((NUM_B/lh)*sizeof(char*));
-		cudaMemcpy(res, hash_dev, (NUM_B/lh)*sizeof(char*), cudaMemcpyDeviceToHost);
-		for (int j = 0; j < (NUM_B/lh);++j){
-			cudaMemcpy(hash[j], res[j], lh, cudaMemcpyDeviceToHost);
+
+		cudaMemcpy2D(hash, host_pitch2, hash_dev, pitch2, height2*sizeof(char), width, cudaMemcpyDeviceToHost);
+
+		for(int j = 0; j < width; ++j){
+			if(strlen(arr[j])>0)
+				f << arr[j] << '\t' << hash[j] << '\n';
 		}
-		
-		print(hash, lh);
 	}
+
+	f.close();
 
 	cudaEventRecord(fin, 0);
 	cudaEventSynchronize(fin);
