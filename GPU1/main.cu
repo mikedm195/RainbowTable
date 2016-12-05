@@ -15,13 +15,13 @@
 #include <stdlib.h>
 #include <time.h>
 #include <fstream>
-#include "md5.h"
+//#include "md5.h"
 //#include "sha.h"
 // Limits of char values
 #define maxChar '~'
 #define minChar ' '
 
-#define SIZE_MD5 17
+#define SIZE_MD5 33
 #define SIZE_SHA 33
 
 // number of bytes to be processed by GPU
@@ -29,6 +29,180 @@
 #define NUM_B_B 1000
 #define NUM_T_B 1024
 
+
+// *************************** MD5 ************************//
+
+__device__ unsigned func0( unsigned abcd[] ){
+    return ( abcd[1] & abcd[2]) | (~abcd[1] & abcd[3]);}
+
+__device__ unsigned func1( unsigned abcd[] ){
+    return ( abcd[3] & abcd[1]) | (~abcd[3] & abcd[2]);}
+
+__device__ unsigned func2( unsigned abcd[] ){
+    return  abcd[1] ^ abcd[2] ^ abcd[3];}
+
+__device__ unsigned func3( unsigned abcd[] ){
+    return abcd[2] ^ (abcd[1] |~ abcd[3]);}
+
+typedef unsigned (*DgstFctn)(unsigned a[]);
+
+typedef union uwb {
+    unsigned w;
+    unsigned char b[4];
+} MD5union;
+
+typedef unsigned DigestArray[4];
+
+__device__ unsigned rol( unsigned r, short N )
+{
+    unsigned  mask1 = (1<<N) -1;
+    return ((r>>(32-N)) & mask1) | ((r<<N) & ~mask1);
+}
+
+__device__ unsigned *calctable( unsigned *k)
+{
+    double s, pwr = 2;
+    int i;
+    for (int j = 1; i < 32; ++i){
+    	pwr *= 2;
+    }
+    //pwr = pow( 2, 32);
+    for (i=0; i<64; i++) {
+        s = fabs(sin((double)(1+i)));
+        k[i] = (unsigned)( s * pwr );
+    }
+    return k;
+}
+
+__device__ unsigned *getMd5( const char *msg, int mlen){
+	DigestArray h0 = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476 };
+    DgstFctn ff[] = { &func0, &func1, &func2, &func3 };
+    short M[] = { 1, 5, 3, 7 };
+    short O[] = { 0, 1, 5, 0 };
+    short rot0[] = { 7,12,17,22};
+    short rot1[] = { 5, 9,14,20};
+    short rot2[] = { 4,11,16,23};
+    short rot3[] = { 6,10,15,21};
+    short *rots[] = {rot0, rot1, rot2, rot3 };
+    unsigned kspace[64];
+    unsigned *k;
+
+    DigestArray h;
+    DigestArray abcd;
+    DgstFctn fctn;
+    short m, o, g;
+    unsigned f;
+    short *rotn;
+    union {
+        unsigned w[16];
+        char     b[64];
+    }mm;
+    int os = 0;
+    int grp, grps, q, p;
+    unsigned char *msg2;
+
+    if (k==NULL) k= calctable(kspace);
+
+    for (q=0; q<4; q++) h[q] = h0[q];   // initialize
+
+    {
+        grps  = 1 + (mlen+8)/64;
+        msg2 = (unsigned char*)malloc( 64*grps);
+        memcpy( msg2, msg, mlen);
+        msg2[mlen] = (unsigned char)0x80;
+        q = mlen + 1;
+        while (q < 64*grps){ msg2[q] = 0; q++ ; }
+        {
+            MD5union u;
+            u.w = 8*mlen;
+            q -= 8;
+            memcpy(msg2+q, &u.w, 4 );
+        }
+    }
+
+    for (grp=0; grp<grps; grp++)
+    {
+        memcpy( mm.b, msg2+os, 64);
+        for(q=0;q<4;q++) abcd[q] = h[q];
+        for (p = 0; p<4; p++) {
+            fctn = ff[p];
+            rotn = rots[p];
+            m = M[p]; o= O[p];
+            for (q=0; q<16; q++) {
+                g = (m*q + o) % 16;
+                f = abcd[1] + rol( abcd[0]+ fctn(abcd) + k[q+16*p] + mm.w[g], rotn[q%4]);
+
+                abcd[0] = abcd[3];
+                abcd[3] = abcd[2];
+                abcd[2] = abcd[1];
+                abcd[1] = f;
+            }
+        }
+        for (p=0; p<4; p++)
+            h[p] += abcd[p];
+        os += 64;
+    }
+    return h;
+}
+
+
+__device__ char * md5(char* msg, int H){
+    int j,k;
+    char * res = "";
+    int sizef = 0;
+    for(int i = 0; i < H; ++i){
+    	if(msg[i] == '\0')
+    		break;
+    	sizef++;
+    }
+    unsigned *d = getMd5(msg, sizef);
+    MD5union u;
+    char temp[33];
+    char mask = 240;
+    char mask2 = 15;
+    temp[32] = '\0';
+    char* temp2;
+    int cont = 0;
+    for (j=0;j<4; j++){
+        u.w = d[j];
+        for (k=0;k<4;k++){
+            int sum = 0;
+            int mult = 8;
+            for (int i = 7 ; i >=4 ; i--) {
+                if((u.b[k] & (1 << i)) != 0 )
+                    sum+=mult;
+                // printf("%d",(u.b[k] & (1 << i)) != 0 );
+                mult/=2;
+            }
+            // printf("\n%d\n",sum );
+            if(sum<=9)
+                temp[cont++] = (char)sum+48;
+            else
+                temp[cont++] = (char)sum+87;
+            sum=0;
+            mult = 8;
+            for (int i = 3 ; i >=0 ; i--) {
+                if((u.b[k] & (1 << i)) != 0 )
+                    sum+=mult;
+                //  printf("%d",(u.b[k] & (1 << i)) != 0 );
+                mult/=2;
+            }
+            if(sum<=9)
+                temp[cont++] = (char)sum+48;
+            else
+                temp[cont++] = (char)sum+87;
+            // printf("%02x", u.b[k] );
+        }
+    }
+    // printf("\n");
+    // printf("%s\n",temp );
+    return temp;
+}
+
+
+//***************************************  MD5 - FIN *************************************//
+
+//*************************************** crear nueva cadena ******************************//
 void nextChar(char* &str, int h){
 	int len = strlen(str);
 
@@ -61,7 +235,7 @@ void nextChar(char* &str, int h){
 	//std::cout << "changed to: -" << str[1] << "-\n";
 }
 
-
+/******************************** KERNEL ***********************************************/
 __global__ void hashBrick(char* a, char* r, int p1, int p2, int H, int algoritmo){
 	int id = threadIdx.x + (blockIdx.x * blockDim.x);
 	char* word = (char*)((char*)a + (id*p1));
@@ -74,6 +248,12 @@ __global__ void hashBrick(char* a, char* r, int p1, int p2, int H, int algoritmo
 			/**** MD5 *****/
 			//hash[0] = 48 + algoritmo;
 			//hash[1] = '\0';
+
+			char* res = md5(word, H);
+
+			for (int i = 0; i < SIZE_MD5-1; ++i){
+				hash[i] = res[i];
+			}
 
 			hash[SIZE_MD5-1] = '\0';
 		}
@@ -93,8 +273,10 @@ __global__ void hashBrick(char* a, char* r, int p1, int p2, int H, int algoritmo
 }
 
 
+/******************* Main ***********************************/
+
 int main(int argc, const char* argv[]){
-	md5("hola");
+	//md5("hola");
 	//sha("hola");
 	int ll, al, blocks, threads, algo;
 
@@ -128,9 +310,12 @@ int main(int argc, const char* argv[]){
 	float tiempo1;
 	cudaEvent_t inicio, fin;
 
+	clock_t t;
+	t = clock();
+
 	cudaEventCreate(&inicio);
 	cudaEventCreate(&fin);
-	cudaEventRecord( inicio, 0);
+	cudaEventRecord(inicio, 0);
 
 
 	al = 0;
@@ -140,6 +325,7 @@ int main(int argc, const char* argv[]){
 		it++;
 	}
 
+	// Calculo de bloques y threads
 	blocks = NUM_B/NUM_B_B;
 	if(blocks < NUM_B*NUM_B_B)
 		blocks++;
@@ -148,6 +334,8 @@ int main(int argc, const char* argv[]){
 
 	std::cout << "Words = " << (NUM_B/lh) << "\n";
 	std::cout << "Total = " << al << "\n";
+
+	// Calculo de bricks a procesar
 
 	int loops = al / (NUM_B/lh);
 	if(loops * (NUM_B/lh) < al)
@@ -184,11 +372,14 @@ int main(int argc, const char* argv[]){
 	size_t pitch2;
 	cudaMallocPitch((void**)&hash_dev, &pitch2, height2, width);
 
+	// Archivo
 	std::ofstream f;
 	f.open("Table.txt");
 
+	// Recorrer todos los bricks
 	for (int i = 0; i < loops; ++i){
 
+		// Crear Bricks
 		for(int j = 0; j < width; ++j){
 			if(strlen(first) <= height-1){
 				for(int k = 0; k < height; ++k){
@@ -202,13 +393,17 @@ int main(int argc, const char* argv[]){
 			}
 		}
 
+		// Copiar a Tarjeta
 		cudaMemcpy2D(arr_dev, pitch1, arr, host_pitch1, height*sizeof(char), width, cudaMemcpyHostToDevice);
 
+		// Procesar el Kernel
 		hashBrick<<<blocks,threads>>>(arr_dev, hash_dev, pitch1, pitch2, height, algo);
 		cudaThreadSynchronize();
 
+		// Copiar a RAM
 		cudaMemcpy2D(hash, host_pitch2, hash_dev, pitch2, height2*sizeof(char), width, cudaMemcpyDeviceToHost);
 
+		// Copiar a DISCO
 		for(int j = 0; j < width; ++j){
 			if(strlen(arr[j])>0)
 				f << arr[j] << '\t' << hash[j] << '\n';
@@ -221,7 +416,9 @@ int main(int argc, const char* argv[]){
 	cudaEventSynchronize(fin);
 	cudaEventElapsedTime(&tiempo1, inicio, fin);
 
-	std::cout << "Time: " << tiempo1 << std::endl;
+	t = clock()-t; 
+
+	std::cout << "Time: " << (((float)t) / CLOCKS_PER_SEC) << std::endl;
 
 	//free(arr);
 

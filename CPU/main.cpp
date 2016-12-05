@@ -38,6 +38,10 @@ int main(int argc, char *argv[]){
         return -1;
     }
 
+    clock_t t;
+
+    t = clock();
+
     std::ofstream a;
 
     int algoritmo = atoi(argv[1]);
@@ -46,9 +50,12 @@ int main(int argc, char *argv[]){
     else if(algoritmo == 1)
         a.open("SHA.txt");
 
-    for(int i = 1; i < 4; i++)
+    for(int i = 2; i < 3; i++)
         combinaciones(i, algoritmo, a);
 
     a.close();
+
+    t = clock()-t;
+    std::cout << "Tiempo: " << (((float)t) / CLOCKS_PER_SEC) << "\n";
     return 0;
 }
