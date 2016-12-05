@@ -10,16 +10,16 @@ typedef union uwb {
 
 typedef unsigned DigestArray[4];
 
-unsigned func0( unsigned abcd[] ){
+__device__ unsigned func0( unsigned abcd[] ){
     return ( abcd[1] & abcd[2]) | (~abcd[1] & abcd[3]);}
 
-unsigned func1( unsigned abcd[] ){
+__device__ unsigned func1( unsigned abcd[] ){
     return ( abcd[3] & abcd[1]) | (~abcd[3] & abcd[2]);}
 
-unsigned func2( unsigned abcd[] ){
+__device__ unsigned func2( unsigned abcd[] ){
     return  abcd[1] ^ abcd[2] ^ abcd[3];}
 
-unsigned func3( unsigned abcd[] ){
+__device__ unsigned func3( unsigned abcd[] ){
     return abcd[2] ^ (abcd[1] |~ abcd[3]);}
 
 typedef unsigned (*DgstFctn)(unsigned a[]);
@@ -45,7 +45,7 @@ k[52..55] := { 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1 }
 k[56..59] := { 0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1 }
 k[60..63] := { 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391 }*/
 
-unsigned *calctable( unsigned *k)
+__device__ unsigned *calctable( unsigned *k)
 {
     double s, pwr;
     int i;
@@ -67,26 +67,26 @@ r[16..31] := {5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20}
 r[32..47] := {4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23}
 r[48..63] := {6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21}
 */
-unsigned rol( unsigned r, short N )
+__device__ unsigned rol( unsigned r, short N )
 {
     unsigned  mask1 = (1<<N) -1;
     return ((r>>(32-N)) & mask1) | ((r<<N) & ~mask1);
 }
 
-unsigned *getMd5( const char *msg, int mlen)
+__device__ unsigned *getMd5( const char *msg, int mlen)
 {
     /*Initialize Digest Array as A , B, C, D */
-    static DigestArray h0 = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476 };
-    static DgstFctn ff[] = { &func0, &func1, &func2, &func3 };
-    static short M[] = { 1, 5, 3, 7 };
-    static short O[] = { 0, 1, 5, 0 };
-    static short rot0[] = { 7,12,17,22};
-    static short rot1[] = { 5, 9,14,20};
-    static short rot2[] = { 4,11,16,23};
-    static short rot3[] = { 6,10,15,21};
-    static short *rots[] = {rot0, rot1, rot2, rot3 };
-    static unsigned kspace[64];
-    static unsigned *k;
+    __shared__ static DigestArray h0 = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476 };
+    __shared__ static DgstFctn ff[] = { &func0, &func1, &func2, &func3 };
+    __shared__ static short M[] = { 1, 5, 3, 7 };
+    __shared__ static short O[] = { 0, 1, 5, 0 };
+    __shared__ static short rot0[] = { 7,12,17,22};
+    __shared__ static short rot1[] = { 5, 9,14,20};
+    __shared__ static short rot2[] = { 4,11,16,23};
+    __shared__ static short rot3[] = { 6,10,15,21};
+    __shared__ static short *rots[] = {rot0, rot1, rot2, rot3 };
+    __shared__ static unsigned kspace[64];
+    __shared__ static unsigned *k;
 
     static DigestArray h;
     DigestArray abcd;
@@ -146,7 +146,7 @@ unsigned *getMd5( const char *msg, int mlen)
     return h;
 }
 
-char * md5(char* msg){
+__device__ char * md5(char* msg){
     int j,k;
     char * res = "";
     unsigned *d = getMd5(msg, strlen(msg));
@@ -156,23 +156,41 @@ char * md5(char* msg){
     char mask2 = 15;
     temp[32] = '\0';
     char* temp2;
+    int cont = 0;
     for (j=0;j<4; j++){
         u.w = d[j];
         for (k=0;k<4;k++){
-            // printf("%02x\n",u.b[k]);
-            //int bits[8];
-            for (int i = 7 ; i >=0 ; i--) {
-                printf("%d",(u.b[k] & (1 << i)) != 0 );
-                //bits[i] = (u.b[k] & (1 << i)) != 0;
+            int sum = 0;
+            int mult = 8;
+            for (int i = 7 ; i >=4 ; i--) {
+                if((u.b[k] & (1 << i)) != 0 )
+                    sum+=mult;
+                // printf("%d",(u.b[k] & (1 << i)) != 0 );
+                mult/=2;
             }
-            printf("\n%x\n", u.b[k] );
-            // temp[k*2] = (u.b[k] & mask) >> 4;
-            // temp[(k*2)+1] = (u.b[k] & mask2);
+            // printf("\n%d\n",sum );
+            if(sum<=9)
+                temp[cont++] = (char)sum+48;
+            else
+                temp[cont++] = (char)sum+87;
+            sum=0;
+            mult = 8;
+            for (int i = 3 ; i >=0 ; i--) {
+                if((u.b[k] & (1 << i)) != 0 )
+                    sum+=mult;
+                //  printf("%d",(u.b[k] & (1 << i)) != 0 );
+                mult/=2;
+            }
+            if(sum<=9)
+                temp[cont++] = (char)sum+48;
+            else
+                temp[cont++] = (char)sum+87;
+            // printf("%02x", u.b[k] );
         }
     }
-    printf("\n");
+    // printf("\n");
     // printf("%s\n",temp );
-    return "sd";
+    return temp;
 }
 
 // int main( int argc, char *argv[] )

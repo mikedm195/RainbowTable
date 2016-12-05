@@ -15,7 +15,8 @@
 #include <stdlib.h>
 #include <time.h>
 #include <fstream>
-
+#include "md5.h"
+//#include "sha.h"
 // Limits of char values
 #define maxChar '~'
 #define minChar ' '
@@ -55,7 +56,7 @@ void nextChar(char* &str, int h){
 		str[i] = temp;
 		temp = temp2;
 	}
-	
+
 	str[0] = minChar;
 	//std::cout << "changed to: -" << str[1] << "-\n";
 }
@@ -93,7 +94,8 @@ __global__ void hashBrick(char* a, char* r, int p1, int p2, int H, int algoritmo
 
 
 int main(int argc, const char* argv[]){
-
+	md5("hola");
+	//sha("hola");
 	int ll, al, blocks, threads, algo;
 
 	if(argc < 3){
@@ -129,7 +131,7 @@ int main(int argc, const char* argv[]){
 	cudaEventCreate(&inicio);
 	cudaEventCreate(&fin);
 	cudaEventRecord( inicio, 0);
-	
+
 
 	al = 0;
 	int it = ll;
@@ -184,7 +186,7 @@ int main(int argc, const char* argv[]){
 
 	std::ofstream f;
 	f.open("Table.txt");
-	
+
 	for (int i = 0; i < loops; ++i){
 
 		for(int j = 0; j < width; ++j){
@@ -220,7 +222,7 @@ int main(int argc, const char* argv[]){
 	cudaEventElapsedTime(&tiempo1, inicio, fin);
 
 	std::cout << "Time: " << tiempo1 << std::endl;
-	
+
 	//free(arr);
 
 	return 0;
